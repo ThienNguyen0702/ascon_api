@@ -4,7 +4,12 @@
 #include <stdlib.h>
 #include <time.h>
 
+#define ASCON_AEAD_128  0
+#define ASCON_AEAD_128A 1
+#define ASCON_AEAD_80PQ 2
+
 typedef struct{
+    uint8_t  variant;
     uint8_t *key;
     uint8_t *nonce;
     uint8_t *adata; 
@@ -74,21 +79,35 @@ void ascon_permutation(uint64_t* state, int rounds) {
 
 void ascon_encrypt(ascon_aead_t ascon_aead_t) {
 
-    if (!ascon_aead_t.key || !ascon_aead_t.nonce || !ascon_aead_t.adata 
-        || !ascon_aead_t.ciphertext || !ascon_aead_t.plaintext) return;
+    uint64_t IV, state[5];
+    uint8_t round_a, round_b, rate;
+    
+    // config for parameter
+    if (ascon_aead_t.variant == ASCON_AEAD_128){
+        IV = 0x80400c0600000000; 
+        round_a = 12; 
+        round_b = 6;
+        rate = 8; // 64 bit
+    } else if (ascon_aead_t.variant == ASCON_AEAD_128A){
+        IV = 0x80800c0800000000; 
+        round_a = 12; 
+        round_b = 8;
+        rate = 16; // 128 bit
+    } else if (ascon_aead_t.variant == ASCON_AEAD_80PQ){
+        IV = 0xa0400c06;
+    }
 
     // Initialization
-    uint64_t state[5];
-    state[0] = 0x80400c0600000000;
+    state[0] = IV;
     state[1] = bytes_to_int(ascon_aead_t.key);
     state[2] = bytes_to_int(ascon_aead_t.key + 8);
     state[3] = bytes_to_int(ascon_aead_t.nonce);
     state[4] = bytes_to_int(ascon_aead_t.nonce + 8);
-    ascon_permutation(state, 12);
+    printf("state init: %llx %llx %llx %llx %llx\n", state[0], state[1], state[2], state[3], state[4]);
+    ascon_permutation(state, round_a);
     state[3] ^= bytes_to_int(ascon_aead_t.key);
     state[4] ^= bytes_to_int(ascon_aead_t.key + 8);
 
-    uint8_t rate = 8;
     uint8_t s = ascon_aead_t.adlen / rate + 1; 
     uint8_t t = ascon_aead_t.ptlen / rate + 1;
     uint8_t l = ascon_aead_t.ptlen % rate;
@@ -112,9 +131,9 @@ void ascon_encrypt(ascon_aead_t ascon_aead_t) {
     // absorb associated data
     for (uint8_t i = 0; i < s; i++) {
         state[0] ^= bytes_to_int(pad_ad + i * rate);  
-        if (rate == 16)
+        if (ascon_aead_t.variant == ASCON_AEAD_128A)
             state[1] ^= bytes_to_int(pad_ad + i * rate + 8);
-        ascon_permutation(state, 6);
+        ascon_permutation(state, round_b);
     }
     state[4] ^= 1;
     free(pad_ad);
@@ -122,23 +141,22 @@ void ascon_encrypt(ascon_aead_t ascon_aead_t) {
     // absorb ciphertext
     for (uint8_t i = 0; i < t-1; i++) {
         state[0] ^= bytes_to_int(pad_pt + i * rate);  
-        if (rate == 16)
+        if (ascon_aead_t.variant == ASCON_AEAD_128A)
             state[1] ^= bytes_to_int(pad_pt + i * rate + 8);
 
         for (int j = 0; j < rate; j++) {
             ascon_aead_t.ciphertext[i * rate + j] = (state[0] >> (8 * (rate - 1 - j))) & 0xFF;
         }
-        if (rate == 16) {
+        if (ascon_aead_t.variant == ASCON_AEAD_128A) {
             for (int j = 0; j < rate; j++) {
                 ascon_aead_t.ciphertext[i * rate + 8 + j] = (state[1] >> (8 * (rate - 1 - j))) & 0xFF;
             }
         }
-
-        ascon_permutation(state, 6);
+        ascon_permutation(state, round_b);
     }
 
     state[0] ^= bytes_to_int(pad_pt + (t - 1) * rate);
-    if (rate == 16)
+    if (ascon_aead_t.variant == ASCON_AEAD_128A)
         state[1] ^= bytes_to_int(pad_pt + (t - 1) * rate + 8);
 
     for (int j = 0; j < l; j++) {
@@ -147,9 +165,15 @@ void ascon_encrypt(ascon_aead_t ascon_aead_t) {
     free(pad_pt);
 
     // Finalization
-    state[1] ^= bytes_to_int(ascon_aead_t.key);
-    state[2] ^= bytes_to_int(ascon_aead_t.key + 8);
-    ascon_permutation(state, 12);
+    if (ascon_aead_t.variant == ASCON_AEAD_128){
+        state[1] ^= bytes_to_int(ascon_aead_t.key);
+        state[2] ^= bytes_to_int(ascon_aead_t.key + 8);
+    } else if (ascon_aead_t.variant == ASCON_AEAD_128A){
+        state[2] ^= bytes_to_int(ascon_aead_t.key);
+        state[3] ^= bytes_to_int(ascon_aead_t.key + 8);
+    }
+    
+    ascon_permutation(state, round_a);
 
     for (int i = 0; i < 8; i++) {
         ascon_aead_t.tag[i]     = ((state[3] >> (56 - 8 * i)) & 0xFF) ^ ascon_aead_t.key[i];
@@ -158,7 +182,7 @@ void ascon_encrypt(ascon_aead_t ascon_aead_t) {
 }
 
 int main() {
-    uint8_t key[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
+    uint8_t key[20] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
     uint8_t nonce[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
     uint8_t ad[5] = {0x41, 0x53, 0x43, 0x4f, 0x4e};
     uint8_t pt[4] = {0x8b, 0x86, 0xd9, 0x32};
@@ -166,6 +190,7 @@ int main() {
     uint8_t tag[16];
 
     ascon_aead_t ascon_aead = {
+        .variant    = ASCON_AEAD_128A,
         .key        = key,
         .nonce      = nonce,
         .adata      = ad,
