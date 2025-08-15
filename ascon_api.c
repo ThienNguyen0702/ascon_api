@@ -17,6 +17,7 @@ typedef struct{
     uint8_t *plaintext;
     uint8_t  ptlen;
     uint8_t *ciphertext;
+    uint8_t  ctlen;
     uint8_t *tag;
 }ascon_aead_t;
 
@@ -185,8 +186,8 @@ int main() {
     uint8_t key[20] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
     uint8_t nonce[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
     uint8_t ad[5] = {0x41, 0x53, 0x43, 0x4f, 0x4e};
-    uint8_t pt[4] = {0x8b, 0x86, 0xd9, 0x32};
-    uint8_t ct[4];
+    uint8_t pt[16] = {0x8b, 0x86, 0xd9, 0x32, 0x8b, 0x86, 0xd9, 0x32, 0x8b, 0x86, 0xd9, 0x32, 0x8b, 0x86, 0xd9, 0x32};
+    uint8_t ct[16];
     uint8_t tag[16];
 
     ascon_aead_t ascon_aead = {
@@ -198,6 +199,7 @@ int main() {
         .plaintext  = pt,
         .ptlen      = sizeof(pt),
         .ciphertext = ct,
+        .ctlen      = sizeof(pt),
         .tag        = tag
     };
 
@@ -209,7 +211,7 @@ int main() {
     printf("Time taken: %.6f seconds\n", elapsed);
     
     printf("Ciphertext: ");
-    for (int i = 0; i < 4; i++) printf("%02X ", ct[i]);
+    for (int i = 0; i < sizeof(pt); i++) printf("%02X ", ct[i]);
     printf("\nTag: ");
     for (int i = 0; i < 16; i++) printf("%02X ", tag[i]);
     printf("\n");
