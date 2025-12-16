@@ -313,6 +313,19 @@ int crypto_aead_encrypt(unsigned char* c, unsigned long long* clen,
   return 0;
 }
 
+  uint32_t overhead_measure(int N = 20000) 
+  {
+      uint32_t min = 0xFFFFFFFF;
+      for (int i = 0; i < N; i++) {
+        uint32_t t0 = micros();
+        uint32_t t1 = micros();
+        uint32_t dt = (uint32_t)(t1 - t0);  
+        if (dt < min) min = dt;
+      }
+       Serial.println(min);
+      return min;
+  } 
+
 void setup() {
   Serial.begin(115200);
   unsigned char n[32] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
@@ -339,12 +352,15 @@ void setup() {
     print_data('a', a, alen);
     print_data('m', m, mlen);
 
-    unsigned long start, done;
+  unsigned long start, done, real_time, overhead;
+
+    overhead = overhead_measure(20000);
     start = micros();
     result |= crypto_aead_encrypt(c, &clen, m, mlen, a, alen, (void*)0, n, k);
-    done = micros() - start;
-    Serial.print("Time (us): ");
-    Serial.println(done);
+    done = micros();
+    Serial.print("Real Time (us): ");
+    real_time = (done - start) - overhead;
+    Serial.println(real_time);
 
     printf("encrypt:\n");
     print_data('c', c, clen - CRYPTO_ABYTES);
